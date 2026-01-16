@@ -1,0 +1,9 @@
+{
+	"servers": {
+		"supabase-attendrix": {
+			"url": "https://mcp.supabase.com/mcp?project_ref=ifazfjkpmeqgovitgkwb",
+			"type": "http"
+		}
+	},
+	"inputs": []
+}
