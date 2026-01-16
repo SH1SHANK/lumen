@@ -18,7 +18,7 @@ I am your digital attendance assistant. Use the commands below to manage your sc
 *Schedule & Info*
 • /today – View your current daily schedule
 • /tomorrow – Get a sneak peek at tomorrow's classes
-• /status – Check your attendance percentage and Amplix score
+• /status – Check your course-wise attendance
 
 *Settings*
 • /remind_me – Toggle 10-minute class reminders

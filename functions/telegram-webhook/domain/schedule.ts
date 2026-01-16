@@ -10,20 +10,19 @@ export interface ScheduleClass extends ClassRecord {
   isMarked?: boolean;
 }
 
-// Get today's schedule for a user
-export async function getTodaySchedule(
-  userID: string
+export async function getScheduleForDate(
+  userID: string,
+  date: string
 ): Promise<ScheduleClass[]> {
   const enrollment = await getUserEnrollment(userID);
   if (!enrollment || !enrollment.courseIDs.length) {
     return [];
   }
 
-  const today = getTodayIST();
   const classes = await getClassesByDate(
     enrollment.batchID,
     enrollment.courseIDs,
-    today
+    date
   );
 
   if (classes.length === 0) {
@@ -40,6 +39,14 @@ export async function getTodaySchedule(
     ...cls,
     isMarked: statusMap.get(cls.classID) ?? false,
   }));
+}
+
+// Get today's schedule for a user
+export async function getTodaySchedule(
+  userID: string
+): Promise<ScheduleClass[]> {
+  const today = getTodayIST();
+  return getScheduleForDate(userID, today);
 }
 
 // Get tomorrow's schedule for a user

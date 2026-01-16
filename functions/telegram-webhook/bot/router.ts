@@ -6,7 +6,7 @@ import { getTodayIST, getTomorrowIST, TIMEZONE } from "../utils/date.ts";
 import { registerStartCommand } from "../commands/start.ts";
 import { registerHelpCommand } from "../commands/help.ts";
 import { getTodaySchedule, getTomorrowSchedule } from "../domain/schedule.ts";
-import { getUserAttendanceSummary } from "../domain/stats.ts";
+import { getUserCourseAttendance } from "../domain/userCourses.ts";
 import {
   markAttendanceByIndices,
   markAttendanceForAll,
@@ -15,6 +15,15 @@ import {
   markAbsenceForAll,
   markAbsenceForClass,
 } from "../domain/attendance.ts";
+import {
+  ATTENDANCE_ACTIONS,
+  buildAttendanceKeyboard,
+} from "../utils/keyboards.ts";
+import {
+  handleAttendanceSelect,
+  handleAttendanceConfirm,
+  handleAttendanceAll,
+} from "../callbacks/attendance.ts";
 
 // Helper: Get user's Firebase UID
 async function getUserUid(chatId: number): Promise<string | null> {
@@ -70,6 +79,18 @@ async function getTodaysClasses(userID: string) {
 
 // Register all routes
 export function registerRoutes() {
+  // Register Attendance Callbacks
+  const selectRegex = new RegExp(`^${ATTENDANCE_ACTIONS.SELECT}:`);
+  bot.callbackQuery(selectRegex, handleAttendanceSelect);
+
+  const confirmRegex = new RegExp(`^${ATTENDANCE_ACTIONS.CONFIRM}:`);
+  bot.callbackQuery(confirmRegex, handleAttendanceConfirm);
+
+  const allActionsRegex = new RegExp(
+    `^(${ATTENDANCE_ACTIONS.ATTEND_ALL}|${ATTENDANCE_ACTIONS.ABSENT_ALL}):`
+  );
+  bot.callbackQuery(allActionsRegex, handleAttendanceAll);
+
   // Register basic commands
   registerStartCommand();
   registerHelpCommand();
@@ -114,9 +135,13 @@ export function registerRoutes() {
               );
             } else if (result.status === "marked") {
               markedCount++;
-              messages.push(`${result.index}. ${result.courseName} - Marked ✅`);
+              messages.push(
+                `${result.index}. ${result.courseName} - Marked ✅`
+              );
             } else {
-              messages.push(`${result.index}. ${result.courseName} - Failed ❌`);
+              messages.push(
+                `${result.index}. ${result.courseName} - Failed ❌`
+              );
             }
           }
 
@@ -129,31 +154,12 @@ export function registerRoutes() {
         }
 
         // No arguments - show buttons
-        const keyboard = new InlineKeyboard();
-
-        for (let i = 0; i < classes.length; i++) {
-          const cls = classes[i];
-          const startTime = new Date(cls.classStartTime).toLocaleTimeString(
-            "en-IN",
-            {
-              timeZone: TIMEZONE,
-              hour: "2-digit",
-              minute: "2-digit",
-            }
-          );
-
-          keyboard.text(
-            `${i + 1}. ${cls.courseName} (${startTime})`,
-            `attend:${cls.classID}`
-          );
-
-          if ((i + 1) % 2 === 0 || i === classes.length - 1) {
-            keyboard.row();
-          }
-        }
+        const dateStr = getTodayIST();
+        // Initial mask 0 (none selected)
+        const keyboard = buildAttendanceKeyboard(classes, dateStr, 0);
 
         await ctx.reply(
-          "📚 *Select classes to mark present:*\n\nOr use: /attend 1 2 3",
+          "📚 *Select classes to mark:*\nTap to select, then confirm action.\nOr /attend 1 2",
           {
             reply_markup: keyboard,
             parse_mode: "Markdown",
@@ -168,76 +174,59 @@ export function registerRoutes() {
 
   // Command: /absent [numbers]
   bot.command("absent", async (ctx) => {
-    try {
-      const uid = ctx.state.firebaseUid;
-      const args = ctx.message?.text?.split(" ").slice(1);
+    await withTyping(ctx, async () => {
+      try {
+        const uid = ctx.state.firebaseUid;
+        const args = ctx.message?.text?.split(" ").slice(1);
 
-      const classes = await getTodaysClasses(uid);
+        const classes = await getTodaysClasses(uid);
 
-      if (classes.length === 0) {
-        return ctx.reply("📭 You have no classes scheduled for today.");
-      }
-
-      // If numbers are provided
-      if (args && args.length > 0) {
-        const indices = args
-          .flatMap((arg) => arg.split(/[,\s]+/))
-          .map((n) => parseInt(n.trim()))
-          .filter((n) => !isNaN(n) && n >= 1 && n <= classes.length);
-
-        if (indices.length === 0) {
-          return ctx.reply(
-            "❌ Invalid class numbers. Use /today to see your schedule."
-          );
+        if (classes.length === 0) {
+          return ctx.reply("📭 You have no classes scheduled for today.");
         }
 
-        // Attendance deletes are delegated to RPCs for bounded execution
-        const results = await markAbsenceByIndices(uid, classes, indices);
-        const messages = results.map(
-          (result) => `${result.index}. ${result.courseName} - Marked absent 📝`
-        );
+        // If numbers are provided
+        if (args && args.length > 0) {
+          const indices = args
+            .flatMap((arg) => arg.split(/[,\s]+/))
+            .map((n) => parseInt(n.trim()))
+            .filter((n) => !isNaN(n) && n >= 1 && n <= classes.length);
 
-        await ctx.reply(`📝 *Absence Update*\n\n${messages.join("\n")}`, {
-          parse_mode: "Markdown",
-        });
-        return;
-      }
+          if (indices.length === 0) {
+            return ctx.reply(
+              "❌ Invalid class numbers. Use /today to see your schedule."
+            );
+          }
 
-      // No arguments - show buttons
-      const keyboard = new InlineKeyboard();
+          // Attendance deletes are delegated to RPCs for bounded execution
+          const results = await markAbsenceByIndices(uid, classes, indices);
+          const messages = results.map(
+            (result) =>
+              `${result.index}. ${result.courseName} - Marked absent 📝`
+          );
 
-      for (let i = 0; i < classes.length; i++) {
-        const cls = classes[i];
-        const startTime = new Date(cls.classStartTime).toLocaleTimeString(
-          "en-IN",
+          await ctx.reply(`📝 *Absence Update*\n\n${messages.join("\n")}`, {
+            parse_mode: "Markdown",
+          });
+          return;
+        }
+
+        // No arguments - show buttons
+        const dateStr = getTodayIST();
+        const keyboard = buildAttendanceKeyboard(classes, dateStr, 0);
+
+        await ctx.reply(
+          "📚 *Select classes to mark:*\nTap to select, then confirm action.\nOr /absent 1 2",
           {
-            timeZone: TIMEZONE,
-            hour: "2-digit",
-            minute: "2-digit",
+            reply_markup: keyboard,
+            parse_mode: "Markdown",
           }
         );
-
-        keyboard.text(
-          `${i + 1}. ${cls.courseName} (${startTime})`,
-          `absent:${cls.classID}`
-        );
-
-        if ((i + 1) % 2 === 0 || i === classes.length - 1) {
-          keyboard.row();
-        }
+      } catch (error) {
+        console.error("Error in /absent:", error);
+        ctx.reply("An error occurred.");
       }
-
-      await ctx.reply(
-        "📚 *Select classes to mark absent:*\n\nOr use: /absent 1 2 3",
-        {
-          reply_markup: keyboard,
-          parse_mode: "Markdown",
-        }
-      );
-    } catch (error) {
-      console.error("Error in /absent:", error);
-      ctx.reply("An error occurred.");
-    }
+    });
   });
 
   // Handle callback queries for attend/absent buttons
@@ -320,179 +309,204 @@ export function registerRoutes() {
 
   // Command: /attend_all
   bot.command("attend_all", async (ctx) => {
-    try {
-      const uid = ctx.state.firebaseUid;
-      const classes = await getTodaysClasses(uid);
+    await withTyping(ctx, async () => {
+      try {
+        const uid = ctx.state.firebaseUid;
+        const classes = await getTodaysClasses(uid);
 
-      if (classes.length === 0) {
-        return ctx.reply("📭 You have no classes scheduled for today.");
-      }
-
-      // Attendance writes are delegated to RPCs for bounded execution
-      const results = await markAttendanceForAll(uid, classes);
-      let markedCount = 0;
-      let alreadyMarked = 0;
-
-      for (const result of results) {
-        if (result.status === "already") {
-          alreadyMarked++;
-        } else if (result.status === "marked") {
-          markedCount++;
+        if (classes.length === 0) {
+          return ctx.reply("📭 You have no classes scheduled for today.");
         }
-      }
 
-      await ctx.reply(
-        `✅ *All Attendance Marked*\n\n` +
-          `Marked: ${markedCount}\n` +
-          `Already marked: ${alreadyMarked}\n` +
-          `Total classes: ${classes.length}`,
-        { parse_mode: "Markdown" }
-      );
-    } catch (error) {
-      console.error("Error in /attend_all:", error);
-      ctx.reply("An error occurred.");
-    }
+        // Attendance writes are delegated to RPCs for bounded execution
+        const results = await markAttendanceForAll(uid, classes);
+        let markedCount = 0;
+        let alreadyMarked = 0;
+
+        for (const result of results) {
+          if (result.status === "already") {
+            alreadyMarked++;
+          } else if (result.status === "marked") {
+            markedCount++;
+          }
+        }
+
+        await ctx.reply(
+          `✅ *All Attendance Marked*\n\n` +
+            `Marked: ${markedCount}\n` +
+            `Already marked: ${alreadyMarked}\n` +
+            `Total classes: ${classes.length}`,
+          { parse_mode: "Markdown" }
+        );
+      } catch (error) {
+        console.error("Error in /attend_all:", error);
+        ctx.reply("An error occurred.");
+      }
+    });
   });
 
   // Command: /absent_all
   bot.command("absent_all", async (ctx) => {
-    try {
-      const uid = ctx.state.firebaseUid;
-      const classes = await getTodaysClasses(uid);
+    await withTyping(ctx, async () => {
+      try {
+        const uid = ctx.state.firebaseUid;
+        const classes = await getTodaysClasses(uid);
 
-      if (classes.length === 0) {
-        return ctx.reply("📭 You have no classes scheduled for today.");
+        if (classes.length === 0) {
+          return ctx.reply("📭 You have no classes scheduled for today.");
+        }
+
+        // Attendance deletes are delegated to RPCs for bounded execution
+        await markAbsenceForAll(uid, classes);
+        await ctx.reply(
+          `📝 *All Absences Recorded*\n\n` +
+            `You've been marked absent for all ${classes.length} class(es) today.`,
+          { parse_mode: "Markdown" }
+        );
+      } catch (error) {
+        console.error("Error in /absent_all:", error);
+        ctx.reply("An error occurred.");
       }
-
-      // Attendance deletes are delegated to RPCs for bounded execution
-      await markAbsenceForAll(uid, classes);
-      await ctx.reply(
-        `📝 *All Absences Recorded*\n\n` +
-          `You've been marked absent for all ${classes.length} class(es) today.`,
-        { parse_mode: "Markdown" }
-      );
-    } catch (error) {
-      console.error("Error in /absent_all:", error);
-      ctx.reply("An error occurred.");
-    }
+    });
   });
 
   // Command: /today
   bot.command("today", async (ctx) => {
-    try {
-      const uid = ctx.state.firebaseUid;
-      // Schedule read path delegates attendance status to RPCs
-      const classes = await getTodaySchedule(uid);
+    await withTyping(ctx, async () => {
+      try {
+        const uid = ctx.state.firebaseUid;
+        // Schedule read path delegates attendance status to RPCs
+        const classes = await getTodaySchedule(uid);
 
-      if (classes.length === 0) {
-        return ctx.reply("📭 You have no classes scheduled for today.");
+        if (classes.length === 0) {
+          return ctx.reply("📭 You have no classes scheduled for today.");
+        }
+
+        const today = getTodayIST();
+        let schedule = `📅 *Today's Schedule (${today})*\n\n`;
+
+        for (let i = 0; i < classes.length; i++) {
+          const cls = classes[i];
+          const startTime = new Date(cls.classStartTime).toLocaleTimeString(
+            "en-IN",
+            {
+              timeZone: TIMEZONE,
+              hour: "2-digit",
+              minute: "2-digit",
+            }
+          );
+          const endTime = new Date(cls.classEndTime).toLocaleTimeString(
+            "en-IN",
+            {
+              timeZone: TIMEZONE,
+              hour: "2-digit",
+              minute: "2-digit",
+            }
+          );
+
+          const status = cls.isMarked ? "✅" : "⏸️";
+
+          schedule += `${i + 1}. *${cls.courseName}* ${status}\n`;
+          schedule += `   ⏰ ${startTime} - ${endTime}\n`;
+          if (cls.classVenue) schedule += `   📍 ${cls.classVenue}\n`;
+          schedule += `\n`;
+        }
+
+        await ctx.reply(schedule, { parse_mode: "Markdown" });
+      } catch (error) {
+        console.error("Error in /today:", error);
+        ctx.reply("An error occurred.");
       }
-
-      const today = getTodayIST();
-      let schedule = `📅 *Today's Schedule (${today})*\n\n`;
-
-      for (let i = 0; i < classes.length; i++) {
-        const cls = classes[i];
-        const startTime = new Date(cls.classStartTime).toLocaleTimeString(
-          "en-IN",
-          {
-            timeZone: TIMEZONE,
-            hour: "2-digit",
-            minute: "2-digit",
-          }
-        );
-        const endTime = new Date(cls.classEndTime).toLocaleTimeString("en-IN", {
-          timeZone: TIMEZONE,
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-
-        const status = cls.isMarked ? "✅" : "⏸️";
-
-        schedule += `${i + 1}. *${cls.courseName}* ${status}\n`;
-        schedule += `   ⏰ ${startTime} - ${endTime}\n`;
-        if (cls.classVenue) schedule += `   📍 ${cls.classVenue}\n`;
-        schedule += `\n`;
-      }
-
-      await ctx.reply(schedule, { parse_mode: "Markdown" });
-    } catch (error) {
-      console.error("Error in /today:", error);
-      ctx.reply("An error occurred.");
-    }
+    });
   });
 
   // Command: /tomorrow
   bot.command("tomorrow", async (ctx) => {
-    try {
-      const uid = ctx.state.firebaseUid;
-      const classes = await getTomorrowSchedule(uid);
+    await withTyping(ctx, async () => {
+      try {
+        const uid = ctx.state.firebaseUid;
+        const classes = await getTomorrowSchedule(uid);
 
-      if (classes.length === 0) {
-        return ctx.reply("📭 You have no classes scheduled for tomorrow.");
+        if (classes.length === 0) {
+          return ctx.reply("📭 You have no classes scheduled for tomorrow.");
+        }
+
+        const tomorrow = getTomorrowIST();
+
+        let schedule = `📅 *Tomorrow's Schedule (${tomorrow})*\n\n`;
+
+        for (let i = 0; i < classes.length; i++) {
+          const cls = classes[i];
+          const startTime = new Date(cls.classStartTime).toLocaleTimeString(
+            "en-IN",
+            {
+              timeZone: TIMEZONE,
+              hour: "2-digit",
+              minute: "2-digit",
+            }
+          );
+          const endTime = new Date(cls.classEndTime).toLocaleTimeString(
+            "en-IN",
+            {
+              timeZone: TIMEZONE,
+              hour: "2-digit",
+              minute: "2-digit",
+            }
+          );
+
+          schedule += `${i + 1}. *${cls.courseName}*\n`;
+          schedule += `   ⏰ ${startTime} - ${endTime}\n`;
+          if (cls.classVenue) schedule += `   📍 ${cls.classVenue}\n`;
+          schedule += `\n`;
+        }
+
+        await ctx.reply(schedule, { parse_mode: "Markdown" });
+      } catch (error) {
+        console.error("Error in /tomorrow:", error);
+        ctx.reply("An error occurred.");
       }
-
-      const tomorrow = getTomorrowIST();
-
-      let schedule = `📅 *Tomorrow's Schedule (${tomorrow})*\n\n`;
-
-      for (let i = 0; i < classes.length; i++) {
-        const cls = classes[i];
-        const startTime = new Date(cls.classStartTime).toLocaleTimeString(
-          "en-IN",
-          {
-            timeZone: TIMEZONE,
-            hour: "2-digit",
-            minute: "2-digit",
-          }
-        );
-        const endTime = new Date(cls.classEndTime).toLocaleTimeString("en-IN", {
-          timeZone: TIMEZONE,
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-
-        schedule += `${i + 1}. *${cls.courseName}*\n`;
-        schedule += `   ⏰ ${startTime} - ${endTime}\n`;
-        if (cls.classVenue) schedule += `   📍 ${cls.classVenue}\n`;
-        schedule += `\n`;
-      }
-
-      await ctx.reply(schedule, { parse_mode: "Markdown" });
-    } catch (error) {
-      console.error("Error in /tomorrow:", error);
-      ctx.reply("An error occurred.");
-    }
+    });
   });
 
   // Command: /status
   bot.command("status", async (ctx) => {
-    try {
-      const uid = ctx.state.firebaseUid;
+    await withTyping(ctx, async () => {
+      try {
+        const uid = ctx.state.firebaseUid;
 
-      const summary = await getUserAttendanceSummary(uid);
-      if (!summary) {
-        return ctx.reply("❌ No enrollment found.");
+        const courses = await getUserCourseAttendance(uid);
+        if (!courses || courses.length === 0) {
+          return ctx.reply("❌ No courses found.");
+        }
+
+        const { getUserGreeting } = await import("../domain/userProfile.ts");
+        const greeting = await getUserGreeting(uid);
+        const header = greeting
+          ? `📊 *${greeting}'s Attendance*\n\n`
+          : "📊 *Your Attendance Status*\n\n";
+
+        let statusText = header;
+
+        for (const course of courses) {
+          const labTag = course.isLab ? " 🧪" : "";
+          statusText += `${course.courseName}${labTag}\n`;
+          statusText += `  ${course.attended} / ${course.total} (${course.percentage}%)\n\n`;
+        }
+
+        statusText +=
+          "\n_Attendance shown is up to date with your recent check-ins._";
+
+        await ctx.reply(statusText.trim(), { parse_mode: "Markdown" });
+      } catch (error) {
+        console.error(
+          `[/status] Failed for uid ${ctx.state.firebaseUid}:`,
+          error
+        );
+        ctx.reply(
+          "❌ Unable to fetch attendance data. Please try again later."
+        );
       }
-
-      const totalClasses = summary.totalClasses;
-      const attendedClasses = summary.attendedClasses;
-      const percentage = summary.percentage.toFixed(1);
-
-      // Calculate Amplix score (attendance % + bonus for consistency)
-      const amplixScore = Math.min(100, summary.percentage + 5);
-
-      await ctx.reply(
-        `📊 *Your Attendance Status*\n\n` +
-          `✅ Attended: ${attendedClasses} / ${totalClasses}\n` +
-          `📈 Percentage: ${percentage}%\n` +
-          `⚡ Amplix Score: ${amplixScore.toFixed(1)}`,
-        { parse_mode: "Markdown" }
-      );
-    } catch (error) {
-      console.error("Error in /status:", error);
-      ctx.reply("An error occurred.");
-    }
+    });
   });
 
   // Command: /remind_me

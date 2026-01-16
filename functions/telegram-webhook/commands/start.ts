@@ -3,6 +3,7 @@ import { bot } from "../bot/bot.ts";
 import { supabase } from "../db/client.ts";
 import { APP_BASE_URL } from "../utils/env.ts";
 import { withTyping } from "../utils/telegram.ts";
+import { getUserGreeting } from "../domain/userProfile.ts";
 
 // Helper: Get user's Firebase UID
 async function getUserUid(chatId: number): Promise<string | null> {
@@ -24,9 +25,11 @@ export function registerStartCommand() {
         const uid = await getUserUid(chatId);
 
         if (uid) {
-          return ctx.reply(
-            "✅ You are already connected to Attendrix.\n\nYour account is active and ready to use. Type /help to see available commands."
-          );
+          const greeting = await getUserGreeting(uid);
+          const welcomeMsg = greeting
+            ? `✅ Welcome back, ${greeting}!\n\nYour account is active and ready to use. Type /help to see available commands.`
+            : "✅ You are already connected to Attendrix.\n\nYour account is active and ready to use. Type /help to see available commands.";
+          return ctx.reply(welcomeMsg);
         }
 
         const connectionLink = `${APP_BASE_URL}?chatID=${chatId}`;
