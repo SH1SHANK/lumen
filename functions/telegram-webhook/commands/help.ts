@@ -5,32 +5,64 @@ export function registerHelpCommand() {
   bot.command("help", async (ctx) => {
     await withTyping(ctx, async () => {
       const helpText = `
-💡 *Lumen Help Guide*
+*Lumen Help*
 
-I am your digital attendance assistant. Use the commands below to manage your schedule and track your presence.
+I help you track attendance and view your class schedule.
 
-*Attendance Commands*
-• /attend – Mark yourself present (shows class buttons or use numbers)
-• /attend_all – Quickly mark present for every class today
-• /absent – Mark yourself absent (shows class buttons or use numbers)
-• /absent_all – Log an absence for all of today's classes
+*Attendance*
+/attend – Mark present (tap classes or type numbers)
+/attend_all – Mark all classes present for today
+/absent – Mark absent (tap classes or type numbers)
+/absent_all – Mark all classes absent for today
 
 *Schedule & Info*
-• /today – View your current daily schedule
-• /tomorrow – Get a sneak peek at tomorrow's classes
-• /status – Check your course-wise attendance
+/today – View today's schedule
+/tomorrow – View tomorrow's schedule
+/status – Check your attendance by course
 
 *Settings*
-• /remind_me – Toggle 10-minute class reminders
-• /daily_brief – Receive a morning summary at 8:00 AM
-• /start – Reset or link a new account
+/remind_me – Toggle reminders 10 minutes before class
+/daily_brief – Toggle morning summary at 8:00 AM
+
+*Account & Recovery*
+/undo – Revert your last attendance action (today only)
+/reset – Disconnect and reconnect your account
+
+*Quick Access*
+/shortcuts – View shorter command aliases
 
 *Examples:*
 /attend → Shows buttons for all classes
-/attend 1 3 5 → Mark classes 1, 3, and 5 as present
+/attend 1 3 5 → Mark classes 1, 3, and 5 present
   `;
 
       await ctx.reply(helpText, { parse_mode: "Markdown" });
+    });
+  });
+
+  bot.command("shortcuts", async (ctx) => {
+    await withTyping(ctx, async () => {
+      const shortcutsText = `
+*Quick Shortcuts*
+
+Speed up your workflow:
+
+*Attendance*
+/a → /attend
+/aa → /attend_all
+/ab → /absent
+
+*Info*
+/s → /status
+/u → /undo
+
+*Examples:*
+/a 1 2 → Mark classes 1 and 2 present
+/aa → Mark all classes present
+/s → View attendance by course
+  `;
+
+      await ctx.reply(shortcutsText, { parse_mode: "Markdown" });
     });
   });
 }

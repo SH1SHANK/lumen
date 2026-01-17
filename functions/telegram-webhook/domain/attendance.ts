@@ -4,6 +4,7 @@ import {
   markAttendanceBulk,
   type AttendanceMarkStatus,
 } from "../db/attendance.ts";
+import { logAttendanceAction } from "../db/undo.ts";
 
 export interface AttendanceActionResult {
   index: number;
@@ -43,6 +44,15 @@ export async function markAttendanceByIndices(
     results.map((result) => [result.class_id, result.status])
   );
 
+  // Log successful marks
+  const successfulClassIDs = results
+    .filter((r) => r.status === "marked")
+    .map((r) => r.class_id);
+
+  if (successfulClassIDs.length > 0) {
+    await logAttendanceAction(userID, "attend", successfulClassIDs);
+  }
+
   return selections.map(({ index, cls }) => ({
     index,
     classID: cls.classID,
@@ -71,7 +81,13 @@ export async function markAttendanceForClass(
     checkinTime: new Date().toISOString(),
   });
 
-  return results[0]?.status ?? "failed";
+  const status = results[0]?.status ?? "failed";
+
+  if (status === "marked") {
+    await logAttendanceAction(userID, "attend", [classItem.classID]);
+  }
+
+  return status;
 }
 
 export interface AbsenceActionResult {
@@ -90,6 +106,11 @@ export async function markAbsenceByIndices(
 
   await deleteAttendanceBulk(userID, classIDs);
 
+  // Log absence marking
+  if (classIDs.length > 0) {
+    await logAttendanceAction(userID, "absent", classIDs);
+  }
+
   return selections.map(({ index, cls }) => ({
     index,
     classID: cls.classID,
@@ -103,6 +124,11 @@ export async function markAbsenceForAll(
 ): Promise<void> {
   const classIDs = classes.map((cls) => cls.classID);
   await deleteAttendanceBulk(userID, classIDs);
+
+  // Log absence marking
+  if (classIDs.length > 0) {
+    await logAttendanceAction(userID, "absent", classIDs);
+  }
 }
 
 export async function markAbsenceForClass(
@@ -110,4 +136,7 @@ export async function markAbsenceForClass(
   classID: string
 ): Promise<void> {
   await deleteAttendanceBulk(userID, [classID]);
+
+  // Log absence marking
+  await logAttendanceAction(userID, "absent", [classID]);
 }

@@ -22,8 +22,8 @@ export async function buildClassReminders(): Promise<ReminderMessage[]> {
     const venueLine = row.class_venue ? `\n📍 ${row.class_venue}` : "";
 
     const text =
-      `⏰ *Class Reminder*\n\n` +
-      `*${row.course_name}* starts at ${startTime}.${venueLine}`;
+      `*Class Reminder*\n\n` +
+      `${row.course_name} starts at ${startTime}.${venueLine}`;
 
     return {
       chatId: row.chat_id,

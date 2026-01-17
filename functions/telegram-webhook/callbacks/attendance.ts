@@ -15,12 +15,12 @@ import {
 export async function handleAttendanceSelect(ctx: Context) {
   const data = ctx.callbackQuery?.data;
   if (!data) {
-    return ctx.answerCallbackQuery("Invalid request");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   const parts = data.split(":");
   if (parts.length < 4) {
-    return ctx.answerCallbackQuery("Invalid data format");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   const dateStr = parts[1];
@@ -29,15 +29,17 @@ export async function handleAttendanceSelect(ctx: Context) {
 
   // Validate date format (YYYY-MM-DD)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    return ctx.answerCallbackQuery("Invalid date");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   if (isNaN(index) || isNaN(currentMask) || index < 0 || index > 31) {
-    return ctx.answerCallbackQuery("Invalid selection");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   const uid = ctx.state?.firebaseUid;
-  if (!uid) return ctx.answerCallbackQuery("Unauthorized");
+  if (!uid) {
+    return ctx.answerCallbackQuery("Please use /start to link your account.");
+  }
 
   try {
     const classes = await getScheduleForDate(uid, dateStr);
@@ -47,7 +49,7 @@ export async function handleAttendanceSelect(ctx: Context) {
 
     // Validate index bounds against actual class count
     if (index >= classes.length) {
-      return ctx.answerCallbackQuery("Invalid class selection");
+      return ctx.answerCallbackQuery("This action has expired.");
     }
 
     // Toggle bit
@@ -58,7 +60,9 @@ export async function handleAttendanceSelect(ctx: Context) {
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error(`[handleAttendanceSelect] Failed for uid ${uid}:`, error);
-    await ctx.answerCallbackQuery("An error occurred");
+    await ctx.answerCallbackQuery(
+      "Something didn't go through. Try again in a moment."
+    );
   }
 }
 
@@ -66,12 +70,12 @@ export async function handleAttendanceSelect(ctx: Context) {
 export async function handleAttendanceConfirm(ctx: Context) {
   const data = ctx.callbackQuery?.data;
   if (!data) {
-    return ctx.answerCallbackQuery("Invalid request");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   const parts = data.split(":");
   if (parts.length < 4) {
-    return ctx.answerCallbackQuery("Invalid data format");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   const dateStr = parts[1];
@@ -80,21 +84,23 @@ export async function handleAttendanceConfirm(ctx: Context) {
 
   // Validate date format (YYYY-MM-DD)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    return ctx.answerCallbackQuery("Invalid date");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   // Validate type
   if (type !== "attend" && type !== "absent") {
-    return ctx.answerCallbackQuery("Invalid action");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   // Validate mask
   if (isNaN(mask) || mask < 0) {
-    return ctx.answerCallbackQuery("Invalid selection");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   const uid = ctx.state?.firebaseUid;
-  if (!uid) return ctx.answerCallbackQuery("Unauthorized");
+  if (!uid) {
+    return ctx.answerCallbackQuery("Please use /start to link your account.");
+  }
 
   try {
     const classes = await getScheduleForDate(uid, dateStr);
@@ -109,7 +115,7 @@ export async function handleAttendanceConfirm(ctx: Context) {
 
     if (indices.length === 0) {
       return ctx.answerCallbackQuery({
-        text: "⚠️ No classes selected!",
+        text: "No classes selected.",
         show_alert: true,
       });
     }
@@ -119,27 +125,29 @@ export async function handleAttendanceConfirm(ctx: Context) {
       const results = await markAttendanceByIndices(uid, classes, indices);
       const marked = results.filter((r) => r.status === "marked").length;
       const already = results.filter((r) => r.status === "already").length;
-      const failed = results.filter((r) => r.status === "failed").length;
 
       await ctx.editMessageText(
-        `✅ *Attendance Marked*\n\n` +
-          `Selected: ${indices.length}\n` +
-          `New: ${marked} | Existing: ${already} | Failed: ${failed}\n\n` +
-          `_Your stats will reflect this immediately._`,
-        { parse_mode: "Markdown" }
+        `Marked ${marked} class${marked > 1 ? "es" : ""} present` +
+          (already > 0 ? ` (${already} already marked)` : "") +
+          `.\n\n_Use /undo to revert if needed._`
       );
     } else {
       // Absent - attendance deletes delegated to RPC (bounded execution)
       await markAbsenceByIndices(uid, classes, indices);
       await ctx.editMessageText(
-        `📝 *Absence Recorded*\n\nMarked absent for ${indices.length} selected class(es).`,
-        { parse_mode: "Markdown" }
+        `Marked ${indices.length} class${
+          indices.length > 1 ? "es" : ""
+        } absent.
+
+_Use /undo to revert if needed._`
       );
     }
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error(`[handleAttendanceConfirm] Failed for uid ${uid}:`, error);
-    await ctx.answerCallbackQuery("An error occurred");
+    await ctx.answerCallbackQuery(
+      "Something didn't go through. Try again in a moment."
+    );
   }
 }
 
@@ -147,12 +155,12 @@ export async function handleAttendanceConfirm(ctx: Context) {
 export async function handleAttendanceAll(ctx: Context) {
   const data = ctx.callbackQuery?.data;
   if (!data) {
-    return ctx.answerCallbackQuery("Invalid request");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   const parts = data.split(":");
   if (parts.length < 2) {
-    return ctx.answerCallbackQuery("Invalid data format");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   const action = parts[0]; // att_a_all or att_abs_all
@@ -160,7 +168,7 @@ export async function handleAttendanceAll(ctx: Context) {
 
   // Validate date format (YYYY-MM-DD)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    return ctx.answerCallbackQuery("Invalid date");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   // Validate action
@@ -168,11 +176,13 @@ export async function handleAttendanceAll(ctx: Context) {
     action !== ATTENDANCE_ACTIONS.ATTEND_ALL &&
     action !== ATTENDANCE_ACTIONS.ABSENT_ALL
   ) {
-    return ctx.answerCallbackQuery("Invalid action");
+    return ctx.answerCallbackQuery("This action has expired.");
   }
 
   const uid = ctx.state?.firebaseUid;
-  if (!uid) return ctx.answerCallbackQuery("Unauthorized");
+  if (!uid) {
+    return ctx.answerCallbackQuery("Please use /start to link your account.");
+  }
 
   try {
     const classes = await getScheduleForDate(uid, dateStr);
@@ -187,23 +197,26 @@ export async function handleAttendanceAll(ctx: Context) {
       const already = results.filter((r) => r.status === "already").length;
 
       await ctx.editMessageText(
-        `✅ *All Attendance Marked*\n\n` +
-          `Total: ${classes.length}\n` +
-          `New: ${marked} | Existing: ${already}\n\n` +
-          `_Your stats will reflect this immediately._`,
-        { parse_mode: "Markdown" }
+        `Marked ${marked} class${marked > 1 ? "es" : ""} present` +
+          (already > 0 ? ` (${already} already marked)` : "") +
+          `.\n\n_Use /undo to revert if needed._`
       );
     } else {
       // Absent All - attendance deletes delegated to RPC (bounded execution)
       await markAbsenceForAll(uid, classes);
       await ctx.editMessageText(
-        `📝 *All Absences Recorded*\n\nMarked absent for all ${classes.length} classes.`,
-        { parse_mode: "Markdown" }
+        `Marked all ${classes.length} class${
+          classes.length > 1 ? "es" : ""
+        } absent.
+
+_Use /undo to revert if needed._`
       );
     }
     await ctx.answerCallbackQuery();
   } catch (error) {
     console.error(`[handleAttendanceAll] Failed for uid ${uid}:`, error);
-    await ctx.answerCallbackQuery("An error occurred");
+    await ctx.answerCallbackQuery(
+      "Something didn't go through. Try again in a moment."
+    );
   }
 }

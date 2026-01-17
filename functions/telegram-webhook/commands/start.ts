@@ -27,8 +27,8 @@ export function registerStartCommand() {
         if (uid) {
           const greeting = await getUserGreeting(uid);
           const welcomeMsg = greeting
-            ? `✅ Welcome back, ${greeting}!\n\nYour account is active and ready to use. Type /help to see available commands.`
-            : "✅ You are already connected to Attendrix.\n\nYour account is active and ready to use. Type /help to see available commands.";
+            ? `Welcome back, ${greeting}.\n\nYour account is connected and ready. Use /help to see what I can do.`
+            : "Your account is already connected.\n\nEverything is ready. Use /help to see what I can do.";
           return ctx.reply(welcomeMsg);
         }
 
@@ -39,17 +39,14 @@ export function registerStartCommand() {
         );
 
         await ctx.reply(
-          "👋 *Welcome to Lumen*\n\n" +
-            "I'm your digital attendance assistant. To get started, you must link your Telegram account with your Attendrix profile.\n\n" +
-            "Click the button below to authenticate.",
+          "Welcome to Lumen.\n\nI help you track attendance and manage your class schedule. To get started, connect your Telegram account with Attendrix.\n\nTap the button below to authenticate.",
           {
             reply_markup: buttonRow,
-            parse_mode: "Markdown",
           }
         );
       } catch (error) {
         console.error("Error in /start:", error);
-        ctx.reply("An error occurred. Please try again.");
+        ctx.reply("Something didn't go through. Try again in a moment.");
       }
     });
   });

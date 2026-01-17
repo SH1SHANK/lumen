@@ -52,15 +52,16 @@ export function buildAttendanceKeyboard(
     keyboard.row();
   }
 
-  // 3. Bulk Actions
-  keyboard.text(
-    "Attend All 🚀",
-    `${ATTENDANCE_ACTIONS.ATTEND_ALL}:${dateStr}`
-  );
-  keyboard.text(
-    "Absent All 😴",
-    `${ATTENDANCE_ACTIONS.ABSENT_ALL}:${dateStr}`
-  );
+  // 3. Bulk Actions (final row)
+  keyboard
+    .text(
+      "✅ Attend All",
+      `${ATTENDANCE_ACTIONS.ATTEND_ALL}:${dateStr}`
+    )
+    .text(
+      "❌ Absent All",
+      `${ATTENDANCE_ACTIONS.ABSENT_ALL}:${dateStr}`
+    );
 
   return keyboard;
 }

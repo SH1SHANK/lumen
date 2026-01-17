@@ -9,7 +9,7 @@ export interface DailyBriefMessage {
   text: string;
 }
 
-const MOTIVATION_LINE = "Keep the streak going 💪";
+const MOTIVATION_LINE = "Keep it up.";
 
 function formatTime(value: string | null): string {
   if (!value) return "TBD";
@@ -27,7 +27,7 @@ function formatClasses(classes: DailyBriefPayload["classes"]): string[] {
     return ["No classes today."];
   }
 
-  const lines = ["Today’s Classes:"];
+  const lines = ["Today's classes:"];
   for (const cls of classes) {
     const time = formatTime(cls.classStartTime);
     const venue = cls.classVenue ? ` • ${cls.classVenue}` : "";
@@ -48,8 +48,8 @@ export async function buildDailyBriefMessages(
       // Get personalized greeting
       const greeting = await getUserGreeting(payload.firebase_uid);
       const greetingLine = greeting
-        ? `🌅 Good morning, ${greeting}`
-        : `🌅 Daily Brief — ${payload.brief_date}`;
+        ? `Good morning, ${greeting}.`
+        : `Good morning. Here's your brief for ${payload.brief_date}.`;
 
       const classesLines = formatClasses(payload.classes);
 
@@ -60,7 +60,7 @@ export async function buildDailyBriefMessages(
       try {
         const courses = await getUserCourseAttendance(payload.firebase_uid);
         if (courses.length > 0) {
-          attendanceLines.push("", "Attendance:");
+          attendanceLines.push("", "Your attendance:");
           for (const course of courses) {
             const labTag = course.isLab ? " 🧪" : "";
             attendanceLines.push(
@@ -74,7 +74,7 @@ export async function buildDailyBriefMessages(
           error
         );
         // Send brief without attendance section on failure
-        attendanceLines = ["", "⚠️ Attendance data unavailable"];
+        attendanceLines = ["", "Attendance data unavailable right now."];
       }
 
       const text = [
@@ -85,7 +85,7 @@ export async function buildDailyBriefMessages(
         "",
         MOTIVATION_LINE,
         "",
-        "Numbers update when you mark attendance via the bot.",
+        "_Updates in real-time as you mark attendance._",
       ].join("\n");
 
       messages.push({

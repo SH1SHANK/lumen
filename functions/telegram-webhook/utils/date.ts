@@ -22,4 +22,11 @@ export function getTomorrowIST(): string {
   return formatClassDate(istTime);
 }
 
+/**
+ * Gets the current time in IST as a Date object.
+ */
+export function getNowIST(): Date {
+  const now = new Date();
+  return new Date(now.toLocaleString("en-US", { timeZone: TIMEZONE }));
+}
 export { TIMEZONE };

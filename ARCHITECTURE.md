@@ -89,6 +89,18 @@ Registers the `/start` command. It checks whether the user is already linked and
 
 Registers the `/help` command and returns the static help text. No database access.
 
+### functions/telegram-webhook/commands/debug.ts
+
+Registers the `/debug` command for admin-only diagnostics. Access control is based on `firebase_data.attrs.fields.isAdmin.booleanValue`. The command displays read-only system diagnostics including cron job status, user settings, and hybrid attendance RPC health. Non-admin users receive a neutral denial message.
+
+### functions/telegram-webhook/commands/reset.ts
+
+Registers the `/reset` command. Displays a confirmation prompt via inline keyboard, then calls `domain/accountReset.ts` to unlink the Telegram account. Handles confirmation and cancellation callbacks.
+
+### functions/telegram-webhook/commands/undo.ts
+
+Registers the `/undo` command. Retrieves firebaseUid from `ctx.state`, calls `domain/undo.ts` to perform the undo, and returns user-friendly feedback.
+
 ### functions/telegram-webhook/callbacks/
 
 Contains handlers for inline keyboard callback queries.
@@ -97,7 +109,7 @@ Contains handlers for inline keyboard callback queries.
 
 ### functions/telegram-webhook/domain/attendance.ts
 
-Orchestrates attendance write actions. It maps command indices to class IDs, uses RPC-backed db functions, and returns result objects for the router to render. It does not import Telegram or the Supabase client.
+Orchestrates attendance write actions. It maps command indices to class IDs, uses RPC-backed db functions, and returns result objects for the router to render. It does not import Telegram or the Supabase client. After successful mutations, logs actions to `attendance_actions` table via `db/undo.ts` for undo capability.
 
 ### functions/telegram-webhook/domain/schedule.ts
 
@@ -123,13 +135,33 @@ Formats daily brief messages from db/dailyBrief.ts payloads. Uses `domain/userPr
 
 Provides `getUserGreeting(firebaseUid)` as the single interface for name resolution. Fetches user profile from `db/firebase.ts` and returns a greeting-safe name. Prefers display_name, falls back to username, then returns null for neutral greetings.
 
+### functions/telegram-webhook/domain/adminAccess.ts
+
+Implements admin access control via `assertAdmin(firebaseUid)`. Checks `firebase_data.attrs.fields.isAdmin.booleanValue` and throws `AdminAccessDeniedError` if not true. Used exclusively by `/debug` command.
+
+### functions/telegram-webhook/domain/adminDebug.ts
+
+Builds diagnostic messages for `/debug` command. Formats data from `db/adminDebug.ts` into user-friendly output. No database access.
+
+### functions/telegram-webhook/domain/accountReset.ts
+
+Orchestrates account re-linking via `/reset` command. Calls `db/telegram.ts` to unlink the Telegram account. Does not contain confirmation logic (handled in command layer).
+
+### functions/telegram-webhook/domain/undo.ts
+
+Implements undo logic for `/undo` command. Validates time-window eligibility (today only), fetches last action, and calls `db/undo.ts` to perform reversion. Returns user-friendly result messages.
+
 ### functions/telegram-webhook/db/client.ts
 
 Creates and exports the Supabase client using the service role key. This is the only place the client is instantiated.
 
 ### functions/telegram-webhook/db/firebase.ts
 
-Fetches minimal user profile data (display_name, username) from `firebase_data.attrs.fields`. Used by `domain/userProfile.ts` for personalization. Does not expose raw attrs.
+Fetches minimal user profile data (display_name, username, isAdmin) from `firebase_data.attrs.fields`. Provides `getUserProfile()` for personalization and `getIsAdmin()` for admin access control. Does not expose raw attrs.
+
+### functions/telegram-webhook/db/adminDebug.ts
+
+Fetches diagnostic data for `/debug` command: cron job timestamps (from `class_notification_log`, `daily_brief_log`), user settings, and hybrid attendance RPC health. Tolerates partial failures - unavailable fields return null.
 
 ### functions/telegram-webhook/db/attendance.ts
 
@@ -150,6 +182,18 @@ Wraps the `get_daily_brief_payloads` RPC used by cron execution to fetch per-use
 ### functions/telegram-webhook/db/courseAttendance.ts
 
 Wraps the `get_effective_course_attendance` RPC that merges Firebase snapshot base with attendanceRecords deltas to produce authoritative per-course attendance.
+
+### functions/telegram-webhook/db/telegram.ts
+
+Provides `unlinkTelegramAccount(chatId)` to delete the Telegram ↔ Firebase UID mapping. Used by `/reset` command. Idempotent and does not affect attendance or Firebase data.
+
+### functions/telegram-webhook/db/undo.ts
+
+Provides action logging, retrieval, and reversion for undo functionality:
+
+- `logAttendanceAction()`: Logs bot-initiated attendance actions to `attendance_actions` table
+- `getLastAttendanceAction()`: Retrieves most recent action for a user
+- `revertAttendanceAction()`: Reverses an action (delete for attend, re-insert for absent) and removes the log entry
 
 ### functions/telegram-webhook/jobs/reminders.ts
 
@@ -282,6 +326,45 @@ Invalid or stale callback payloads fail gracefully with user-friendly messages.
 - Course-wise attendance is always current and accurate.
 - **All attendance reads must use `domain/userCourses.ts::getUserCourseAttendance()`**. Direct RPC calls or alternative read paths are prohibited.
 
+## Admin Access and Diagnostics
+
+### Admin Access Control
+
+Admin status is determined exclusively by Firebase:
+
+- A user is an admin if `firebase_data.attrs.fields.isAdmin.booleanValue === true`
+- No Telegram IDs, environment variables, or hardcoded lists are used
+- Access control is enforced via `domain/adminAccess.ts::assertAdmin()`
+
+### /debug Command
+
+The `/debug` command provides read-only operational diagnostics for admin users:
+
+**Access**: Admin-only (enforced via Firebase isAdmin flag)
+
+**Diagnostics Shown**:
+
+- Last reminder cron run timestamp (system-wide)
+- Last daily brief cron run timestamp (system-wide)
+- User's reminder enabled status
+- User's daily brief enabled status
+- Hybrid attendance RPC health check
+- Course count resolved by hybrid RPC
+
+**What is NOT shown**:
+
+- Raw Firebase attrs
+- Email addresses
+- Internal database IDs
+- Stack traces or error details
+- Other users' data
+
+**Failure Handling**: Partial failures are tolerated. If some diagnostics fail to load, they are marked as "Unknown" or "N/A" rather than crashing the command.
+
+**Logging**: Admin debug usage is logged with firebase_uid and timestamp only. Diagnostic payloads are not logged.
+
+**Use Cases**: Verify cron jobs are running, check RPC health, confirm user settings without direct database access.
+
 ## Interaction Models
 
 ### Tap-Only Attendance
@@ -328,3 +411,110 @@ The bot addresses users personally in key messages using Firebase profile data:
 **Performance**: Profile data is fetched once per request and reused within the same execution. No cross-request caching is implemented.
 
 **Implementation**: `domain/userProfile.ts::getUserGreeting()` provides the single interface for name resolution. `db/firebase.ts` handles raw profile queries.
+
+## User Recovery: Reset and Undo
+
+The bot provides two recovery mechanisms for users who make mistakes or need to change their account linking.
+
+### /reset – Account Re-linking
+
+**Purpose**: Allows users to disconnect their Telegram from Attendrix and re-link to a different account.
+
+**What it does**:
+
+- Removes the Telegram chat_id ↔ firebase_uid mapping from `telegram_user_mappings`
+- Forces authentication middleware to block all commands until `/start` is run again
+- Requires explicit confirmation via inline keyboard to prevent accidental disconnection
+
+**What it does NOT do**:
+
+- Does NOT delete any attendance data from `attendanceRecords`
+- Does NOT delete Firebase data
+- Does NOT delete course enrollment or user profile data
+- Does NOT automatically link a new account
+
+**Use case**: User accidentally linked the wrong Attendrix account, or wants to switch to a different account.
+
+**Implementation**:
+
+- `commands/reset.ts`: Telegram command handler with confirmation flow
+- `domain/accountReset.ts`: Business logic orchestration
+- `db/telegram.ts`: Direct database mutation (DELETE from telegram_user_mappings)
+
+**Safety**:
+
+- Requires inline keyboard confirmation
+- Clear messaging about what is preserved vs removed
+- Idempotent: safe to run multiple times
+
+### /undo – Last Action Reversal
+
+**Purpose**: Allows users to revert their most recent attendance-related action performed via the bot.
+
+**What it does**:
+
+- Reverts the user's last attendance mutation (attend or absent)
+- Only works for actions performed today (same day in IST)
+- Only undoes bot-initiated actions (not manual or web-based attendance)
+
+**Action Types**:
+
+- Undo "attend" → deletes the attendance records that were just marked
+- Undo "absent" → re-inserts attendance records that were just deleted (conservative: only if class still exists in timetable)
+
+**What it does NOT do**:
+
+- Does NOT undo actions from previous days
+- Does NOT undo manual attendance changes made in the mobile app
+- Does NOT undo cron-scheduled actions (reminders, daily brief)
+- Does NOT provide multi-step undo (only most recent action)
+- Does NOT expose raw class IDs or internal state to users
+
+**Use case**: User accidentally marked attendance for the wrong class(es), or accidentally marked absent instead of present.
+
+**Audit Trail**:
+
+- All bot-initiated attendance actions are logged to `attendance_actions` table
+- Table contains: firebase_uid, action_type (attend/absent), affected_class_ids[], created_at
+- Action log entries are deleted after successful undo
+- Undo itself is NOT logged as a separate action (prevents undo-redo loops)
+
+**Implementation**:
+
+- `commands/undo.ts`: Telegram command handler
+- `domain/undo.ts`: Business logic with time-window validation
+- `db/undo.ts`: Action logging, retrieval, and reversion
+- `domain/attendance.ts`: Integrated action logging after successful mutations
+
+**Safety Guarantees**:
+
+- Time-bounded: only actions from today
+- Conservative: undo "absent" only restores attendance if class still exists
+- Idempotent: safe to retry (action is deleted after reversion)
+- Deterministic: does not guess or infer user intent
+
+**Limitations (Intentional)**:
+
+- Single-step undo only (no undo history)
+- Same-day only (no historical undo)
+- Bot-initiated only (does not track app-based changes)
+- No redo capability
+
+**Why Conservative**:
+
+- Prevents accidental data corruption
+- Reduces support load from undo mistakes
+- Ensures audit trail remains clean
+- Maintains data integrity across bot and mobile app
+
+### Difference: Reset vs Undo
+
+| Feature            | /reset                            | /undo                                  |
+| ------------------ | --------------------------------- | -------------------------------------- |
+| **Scope**          | Account linking                   | Last attendance action                 |
+| **Time limit**     | None                              | Today only                             |
+| **Confirmation**   | Required (inline keyboard)        | Not required                           |
+| **Data deleted**   | telegram_user_mappings row        | attendance_actions + attendanceRecords |
+| **Data preserved** | All attendance, Firebase, courses | All data except last action            |
+| **Reversible**     | Yes (run /start again)            | No (undo is one-way)                   |
+| **Use case**       | Wrong account linked              | Accidental attendance mark             |

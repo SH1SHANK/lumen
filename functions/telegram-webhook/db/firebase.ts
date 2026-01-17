@@ -36,3 +36,26 @@ export async function getUserProfile(
     username,
   };
 }
+
+/**
+ * Check if a user is an admin based on firebase_data.attrs.fields.isAdmin.booleanValue.
+ * Returns false if the field is missing or not explicitly true.
+ */
+export async function getIsAdmin(firebaseUid: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("firebase_data")
+    .select("attrs")
+    .ilike("name", `%${firebaseUid}`)
+    .single();
+
+  if (error || !data) {
+    return false;
+  }
+
+  const fields = data.attrs?.fields;
+  if (!fields) return false;
+
+  // Firestore stores booleans as {booleanValue: true/false}
+  const isAdmin = fields.isAdmin?.booleanValue;
+  return isAdmin === true;
+}
